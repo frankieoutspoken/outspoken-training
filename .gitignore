@@ -1,0 +1,22 @@
+# AI Lab reference materials (not part of the training)
+ai_lab-main/
+ai_lab-main.zip
+AL1-*.pdf
+
+# Environment
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Generated files
+midnight-cosmetics-agent/output/
+midnight_products.jsonl
+midnight_orders.csv
+
+# OS
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
