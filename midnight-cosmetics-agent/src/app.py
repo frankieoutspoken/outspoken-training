@@ -8,7 +8,6 @@ from claude_agent_sdk import (
     ResultMessage,
     TextBlock,
     ToolUseBlock,
-    ToolResultBlock,
     create_sdk_mcp_server,
 )
 from src.config import PROJECT_ROOT
@@ -57,6 +56,50 @@ def get_options(session_id: str | None = None) -> ClaudeAgentOptions:
         opts.resume = session_id
 
     return opts
+
+
+def run_agent_sync(prompt: str, session_id: str | None = None) -> tuple[str, str, str | None]:
+    """Run the agent and return (response_text, active_agent, sdk_session_id)."""
+
+    response_text = ""
+    active_agent = "Router"
+    sdk_session_id = None
+
+    async def _run():
+        nonlocal response_text, active_agent, sdk_session_id
+
+        options = get_options(session_id)
+
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(prompt)
+
+            async for message in client.receive_response():
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            response_text += block.text
+                        elif isinstance(block, ToolUseBlock):
+                            if block.name == "Agent":
+                                agent_type = block.input.get("subagent_type", "")
+                                if agent_type:
+                                    active_agent = agent_type
+
+                elif isinstance(message, ResultMessage):
+                    sdk_session_id = message.session_id
+                    # Only use result as fallback if we didn't get text from streaming
+                    if not response_text and message.result:
+                        response_text = message.result
+
+    # Handle Streamlit's existing event loop
+    try:
+        loop = asyncio.get_running_loop()
+        import nest_asyncio
+        nest_asyncio.apply()
+        loop.run_until_complete(_run())
+    except RuntimeError:
+        asyncio.run(_run())
+
+    return response_text, active_agent, sdk_session_id
 
 
 # --- Streamlit UI ---
@@ -113,39 +156,16 @@ if prompt := st.chat_input("How can we help you today?"):
     # Run agent
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            response_text = ""
-            active_agent = "Router"
+            response_text, active_agent, sdk_session_id = run_agent_sync(
+                prompt, st.session_state.sdk_session_id
+            )
 
-            async def run_agent():
-                nonlocal response_text, active_agent
-
-                options = get_options(st.session_state.sdk_session_id)
-
-                async with ClaudeSDKClient(options=options) as client:
-                    await client.query(prompt)
-
-                    async for message in client.receive_response():
-                        if isinstance(message, AssistantMessage):
-                            for block in message.content:
-                                if isinstance(block, TextBlock):
-                                    response_text += block.text
-                                elif isinstance(block, ToolUseBlock):
-                                    # Track which agent is being used
-                                    if block.name == "Agent":
-                                        agent_type = block.input.get("subagent_type", "")
-                                        if agent_type:
-                                            active_agent = agent_type
-                                            if agent_type not in st.session_state.agent_history:
-                                                st.session_state.agent_history.append(agent_type)
-
-                        elif isinstance(message, ResultMessage):
-                            st.session_state.sdk_session_id = message.session_id
-                            if message.result:
-                                response_text = message.result
-
-            asyncio.run(run_agent())
-
+            # Update session state
             st.session_state.current_agent = active_agent
+            if sdk_session_id:
+                st.session_state.sdk_session_id = sdk_session_id
+            if active_agent not in st.session_state.agent_history:
+                st.session_state.agent_history.append(active_agent)
 
             if response_text:
                 st.markdown(response_text)
