@@ -4,133 +4,47 @@
 
 ---
 
-Use the `/new-sdk-app` skill to scaffold the project, then build the following multi-agent system.
-
-## Overview
-
 Build a **Midnight Cosmetics** customer service multi-agent system using the **Claude Agent SDK (Python)** with a **Streamlit** frontend.
 
-Follow the project structure defined in `CLAUDE.md`.
+## Project Structure
 
-## Agent Architecture
+```
+midnight-cosmetics-agent/
+├── src/
+│   ├── __init__.py
+│   ├── config.py                  # Environment vars, file paths
+│   ├── app.py                     # Streamlit frontend
+│   ├── agents/
+│   │   ├── __init__.py            # Imports all agents, exports AGENTS dict
+│   │   ├── product_agent.py       # Product & FAQ specialist
+│   │   ├── returns_agent.py       # Returns specialist
+│   │   ├── beauty_agent.py        # Beauty profile generator
+│   │   └── escalation_agent.py    # Human escalation handler
+│   └── tools/
+│       ├── __init__.py
+│       ├── product_lookup.py      # CSV lookup for products
+│       ├── order_lookup.py        # CSV lookup for orders
+│       ├── knowledge_search.py    # OpenAI vector store search
+│       └── document_generator.py  # .docx beauty profile generator
+├── data/                          # Symlinked or copied from parent repo
+├── .env.example
+├── requirements.txt
+└── CLAUDE.md
+```
 
-### Router Agent
-- **Model**: `claude-haiku-4-5-20251001` (fast and cheap — routing is a classification task)
-- **Purpose**: Receives all incoming customer messages and routes to the correct specialist agent
-- **Routing categories**:
-  - `product` — questions about products, ingredients, prices, recommendations, skincare tips, beauty advice
-  - `returns` — return requests, order issues, refund questions, damaged items
-  - `beauty_profile` — quiz results, personalized recommendations, beauty profile generation
-  - `escalation` — requests for a human, complaints, anything the router can't categorize
-- **Parameters**: `max_tokens: 50`, `temperature: 0` (deterministic routing)
-- **Output format**: JSON with `{"route": "product|returns|beauty_profile|escalation", "reason": "brief explanation"}`
-- **Session tracking**: Every interaction must carry a `session_id` (UUID generated at conversation start). Pass this to all specialist agents so the full conversation can be reconstructed.
+## Dependencies
 
-### Product & FAQ Agent
-- **Model**: `claude-sonnet-4-6-20250514`
-- **Purpose**: Answer product questions and beauty/skincare advice
-- **Instructions**:
-  - You are a knowledgeable beauty consultant for Midnight Cosmetics.
-  - Be warm, helpful, and enthusiastic about the products without being pushy.
-  - When recommending products, always include the product name, price, and why it's relevant to the customer's needs.
-  - Never recommend or mention products that aren't in the catalog.
-  - If you don't know the answer, say so — don't make things up.
-- **Tools**:
-  1. `search_products(query: str, category: str = None, max_price: float = None) -> list` — CSV lookup against `data/midnight_products.csv`. Filter by category (Face, Eyes, Lips) and/or max price. Search product names and descriptions.
-  2. `search_knowledge_base(query: str) -> list` — Search the OpenAI vector store (ID: `<VECTOR_STORE_ID>`) for relevant beauty articles, skincare tips, ingredient info, and FAQs. Use model `text-embedding-3-small` for query embedding.
-- **Parameters**: `max_tokens: 500`, `temperature: 0.3`
-- **Guardrails**:
-  - Never mention competitor brands
-  - Never provide medical advice — redirect to a dermatologist if someone asks about skin conditions
-  - Only recommend products from the Midnight Cosmetics catalog
-
-### Returns Agent
-- **Model**: `claude-sonnet-4-6-20250514`
-- **Purpose**: Handle return requests according to the return policy
-- **Instructions**:
-  - You handle returns for Midnight Cosmetics.
-  - Always ask for the **order ID** first before doing anything.
-  - After looking up the order, check ALL of the following rules:
-
-  **RETURN POLICY (follow exactly):**
-  - Returns accepted within **7 days** of delivery date only.
-  - Items must be **unopened** and in original packaging for a full refund.
-  - **Opened items** can only be exchanged for the same product in a different shade — not refunded.
-  - **Sale items** are final sale — no returns or exchanges.
-  - **Damaged items** receive a full refund regardless of all other rules. Ask for a photo.
-  - Refunds processed to original payment method within 5-7 business days.
-
-  **PROCESS:**
-  1. Ask for order ID
-  2. Look up the order using the order lookup tool
-  3. Calculate days since delivery (today's date minus delivery_date)
-  4. Check: Is it within 7 days? Is it a sale item? Is it damaged?
-  5. Respond according to the rules
-  6. If the customer disputes or asks for a manager → hand off to Escalation Agent
-
-- **Tools**:
-  1. `lookup_order(order_id: str) -> dict` — CSV lookup against `data/midnight_orders.csv`. Returns order details including customer name, product, order_date, delivery_date, status, and sale_item flag.
-- **Parameters**: `max_tokens: 400`, `temperature: 0.1` (low creativity — follow the rules)
-- **Guardrails**:
-  - Never override the return policy
-  - Never promise a refund that doesn't meet the criteria
-  - Always be empathetic but firm
-- **Handoff**: If the customer is unhappy with the policy decision or asks for a manager, hand off to the Escalation Agent with context about what happened.
-
-### Beauty Profile Agent
-- **Model**: `claude-sonnet-4-6-20250514`
-- **Purpose**: Generate personalized beauty profile documents from quiz results
-- **Instructions**:
-  - Collect the following from the customer (ask if not provided):
-    - Skin type (oily, dry, combination, sensitive, normal)
-    - Preferred look (natural, bold, glam, minimalist)
-    - Top skin concerns (acne, aging, dryness, redness, dark spots, pores)
-  - Use the product catalog to recommend 3-5 products tailored to their profile
-  - Generate a branded beauty profile document (.docx) with:
-    - Customer's name (ask for it)
-    - Their skin profile summary
-    - Personalized product recommendations with explanations
-    - A morning and evening routine suggestion
-    - Application tips relevant to their concerns
-  - Use the Midnight Cosmetics brand voice: warm, confident, inclusive
-- **Tools**:
-  1. `search_products(query: str, category: str = None) -> list` — same product lookup tool
-  2. `search_knowledge_base(query: str) -> list` — for skincare tips and routines relevant to their profile
-  3. `generate_document(content: dict) -> str` — creates a branded .docx file and returns the file path
-- **Parameters**: `max_tokens: 1000`, `temperature: 0.5` (some creativity for personalized writing)
-
-### Escalation Agent
-- **Model**: `claude-haiku-4-5-20251001` (simple task — just collect info)
-- **Purpose**: Handle situations other agents can't resolve
-- **Instructions**:
-  - Apologize that you couldn't resolve their issue
-  - Collect the customer's **full name** and **email address**
-  - Confirm the information back to them
-  - Let them know a human team member will follow up within 24 hours
-  - Log the escalation with: session_id, customer name, email, reason for escalation, conversation summary
-- **Parameters**: `max_tokens: 200`, `temperature: 0`
-- **Guardrails**:
-  - Never make promises about outcomes ("I'm sure they'll approve your refund")
-  - Just collect info and confirm
-
-## Session Tracking
-
-Every conversation starts with a `session_id` (UUID4). This ID:
-- Gets generated when the Streamlit chat initializes
-- Gets passed to every agent interaction
-- Gets logged with every tool call
-- Allows the full conversation to be reconstructed: which agents handled what, what tools were called, what decisions were made
-- Display the session_id in the Streamlit sidebar
-
-## Streamlit Frontend
-
-- Chat interface with message history
-- Sidebar showing:
-  - Current session ID
-  - Which agent is currently handling the conversation
-  - Agent handoff history (e.g., "Router → Product Agent → Escalation Agent")
-- Messages from different agents should be visually distinct (different colors or labels)
-- Include a "New Conversation" button that generates a fresh session_id
+```
+claude-agent-sdk>=0.1.50
+anthropic>=0.52.0
+openai>=1.82.0
+streamlit>=1.45.0
+python-dotenv>=1.0.0
+python-docx>=1.1.0
+pandas>=2.2.0
+numpy>=1.26.0
+nest_asyncio>=1.6.0
+```
 
 ## Environment Variables
 
@@ -140,16 +54,160 @@ OPENAI_API_KEY=your_openai_key
 VECTOR_STORE_ID=your_vector_store_id
 ```
 
-## Test Scenarios to Verify
+## Config (src/config.py)
 
-After building, test these:
+Load env vars with `python-dotenv`. Define paths:
+- `PROJECT_ROOT` = the `midnight-cosmetics-agent/` directory
+- `DATA_DIR` = `../data/` (parent repo's data folder)
+- `PRODUCTS_CSV` = `data/midnight_products.csv`
+- `ORDERS_CSV` = `data/midnight_orders.csv`
+- `RETURN_POLICY` = `data/midnight_return_policy.md`
+- `OUTPUT_DIR` = `midnight-cosmetics-agent/output/` (for generated docs, create if not exists)
 
-1. **Product lookup**: "What products do you have for oily skin?" → CSV lookup, should find Stardust Setting Powder and others
-2. **Knowledge base (RAG)**: "How do I apply foundation without it looking cakey?" → Vector store search, finds application tips article
-3. **Return within window**: "I want to return order MC-1001" → 3 days since delivery, eligible
-4. **Return outside window**: "I want to return order MC-1002" → 10 days since delivery, should deny
-5. **Sale item return**: "I want to return order MC-1003" → Sale item, final sale, should deny
-6. **Damaged item**: "Order MC-1008 arrived damaged" → Should offer full refund regardless of window
-7. **Beauty profile**: "I took the beauty quiz: oily skin, natural look, acne concerns" → Should generate personalized doc
-8. **Escalation**: "I need to speak to a manager" → Should collect name and email
-9. **Session continuity**: Verify the session_id persists across agent handoffs
+## Tools
+
+All tools use the `@tool` decorator from `claude_agent_sdk` and are bundled into a single MCP server called `"midnight"` via `create_sdk_mcp_server()`.
+
+### search_products
+- **Name**: `search_products`
+- **Description**: Search the Midnight Cosmetics product catalog. Filter by category (Face, Eyes, Lips), max price, or search product names and descriptions by keyword.
+- **Input schema**: `{"query": str, "category": str, "max_price": float}`
+- **Implementation**: Read `data/midnight_products.csv` with pandas. Filter by category (case-insensitive), max_price (if > 0), and keyword search (check if query appears in name OR description, case-insensitive). Return formatted results with name, category, price, and description.
+
+### lookup_order
+- **Name**: `lookup_order`
+- **Description**: Look up a Midnight Cosmetics order by order ID. Returns customer name, product, order date, delivery date, status, and whether it was a sale item.
+- **Input schema**: `{"order_id": str}`
+- **Implementation**: Read `data/midnight_orders.csv` with pandas. Match by order_id (case-insensitive). If delivered, calculate days since delivery (`datetime.now() - delivery_date`). Return all order fields plus `days_since_delivery` and `within_7_day_return_window` (Yes/No).
+
+### search_knowledge_base
+- **Name**: `search_knowledge_base`
+- **Description**: Search the Midnight Cosmetics beauty knowledge base for skincare routines, ingredient info, application tips, and FAQs. Use for beauty advice and how-to questions — NOT for product lookups.
+- **Input schema**: `{"query": str}`
+- **Implementation**: Use the OpenAI client to call `vector_stores.search()` with `vector_store_id` from env, query text, and `max_num_results=3`. Return the text content of matching chunks.
+
+### generate_beauty_profile
+- **Name**: `generate_beauty_profile`
+- **Description**: Generate a branded Midnight Cosmetics beauty profile document (.docx). Provide customer name, skin type, preferred look, concerns, and product recommendations as a JSON object.
+- **Input schema**: `{"profile_data": str}` (JSON string)
+- **Implementation**: Parse the JSON. Use `python-docx` to create a branded document with: title ("Midnight Cosmetics"), subtitle ("Your Personalized Beauty Profile"), customer name, date, skin profile summary, product recommendations with prices and reasons, morning/evening routines, application tips, and a footer. Save to `output/` directory. Return the file path.
+
+## MCP Server Setup
+
+Bundle all 4 tools into one MCP server in `app.py`:
+
+```python
+midnight_server = create_sdk_mcp_server(
+    name="midnight",
+    version="1.0.0",
+    tools=[search_products, lookup_order, search_knowledge_base, generate_beauty_profile],
+)
+```
+
+Tool names become: `mcp__midnight__search_products`, `mcp__midnight__lookup_order`, `mcp__midnight__search_knowledge_base`, `mcp__midnight__generate_beauty_profile`
+
+## Agents
+
+Each agent is its own file in `src/agents/`. Each file exports a single `AgentDefinition` instance. The `__init__.py` imports all four and exports them as a dict called `AGENTS`.
+
+### Router (main agent — defined in app.py system_prompt)
+- **Model**: `claude-haiku-4-5-20251001`
+- **Role**: Receives all customer messages, delegates to the right specialist
+- **System prompt**:
+  ```
+  You are the Midnight Cosmetics customer service router.
+  Your job is to understand the customer's request and delegate to the right specialist agent.
+
+  ROUTING RULES:
+  - Product questions, recommendations, skincare tips, ingredient questions, FAQs → use product-agent
+  - Return requests, refund questions, order issues, damaged items → use returns-agent
+  - Beauty quiz results, personalized profile requests → use beauty-profile-agent
+  - Requests for a human, complaints you can't categorize, manager requests → use escalation-agent
+
+  Always delegate. Never try to answer directly — use the right agent.
+  ```
+- **Allowed tools**: `["Agent", "mcp__midnight__search_products", "mcp__midnight__lookup_order", "mcp__midnight__search_knowledge_base", "mcp__midnight__generate_beauty_profile"]`
+- **Permission mode**: `acceptEdits`
+- **Max turns**: 15
+
+### product-agent (src/agents/product_agent.py)
+- **Model**: `sonnet`
+- **Description**: Answer questions about products, ingredients, skincare routines, application tips, and beauty advice.
+- **Tools**: `mcp__midnight__search_products`, `mcp__midnight__search_knowledge_base`
+- **Instructions**: Knowledgeable beauty consultant. Warm and helpful. Always include product name, price, and relevance. Never recommend products not in the catalog. Never mention competitors. Never give medical advice. Don't make things up.
+
+### returns-agent (src/agents/returns_agent.py)
+- **Model**: `sonnet`
+- **Description**: Handle return requests, refund questions, order issues, damaged items. Always asks for order ID first.
+- **Tools**: `mcp__midnight__lookup_order`
+- **Instructions**: Follow the return policy exactly. Process: ask for order ID → look up order → calculate days since delivery → apply rules → respond. The full return policy text from `data/midnight_return_policy.md` is loaded and embedded directly in the prompt via f-string. Guardrails: never override policy, never promise ineligible refunds, be empathetic but firm. If customer disputes → suggest connecting with human team member.
+
+### beauty-profile-agent (src/agents/beauty_agent.py)
+- **Model**: `sonnet`
+- **Description**: Generate personalized beauty profiles from quiz results.
+- **Tools**: `mcp__midnight__search_products`, `mcp__midnight__search_knowledge_base`, `mcp__midnight__generate_beauty_profile`
+- **Instructions**: Collect name, skin type, preferred look, concerns (ask if not provided). Search products for 3-5 matches. Search knowledge base for relevant tips. Generate .docx with `generate_beauty_profile` tool — pass a JSON string with: name, skin_type, preferred_look, concerns (list), recommendations (list of {name, price, reason}), morning_routine, evening_routine, tips.
+
+### escalation-agent (src/agents/escalation_agent.py)
+- **Model**: `haiku`
+- **Description**: Handle situations other agents can't resolve. Collect name and email.
+- **Tools**: none
+- **Instructions**: Apologize, collect full name and email, confirm back, let them know human follow-up within 24 hours. Never make promises about outcomes.
+
+### agents/__init__.py
+
+```python
+from src.agents.product_agent import product_agent
+from src.agents.returns_agent import returns_agent
+from src.agents.beauty_agent import beauty_agent
+from src.agents.escalation_agent import escalation_agent
+
+AGENTS = {
+    "product-agent": product_agent,
+    "returns-agent": returns_agent,
+    "beauty-profile-agent": beauty_agent,
+    "escalation-agent": escalation_agent,
+}
+```
+
+## Streamlit Frontend (src/app.py)
+
+### Session Tracking
+- Generate a `session_id` (UUID4) when the chat initializes
+- Store in `st.session_state`
+- Use the SDK's `session_id` from `ResultMessage` to resume conversations via `ClaudeAgentOptions(resume=session_id)`
+- Display session_id in sidebar
+
+### Async Handling
+- Wrap async agent calls in a `run_agent_sync()` function
+- Use `nest_asyncio` to handle Streamlit's existing event loop
+- Try `asyncio.get_running_loop()` first, fall back to `asyncio.run()`
+
+### UI Layout
+- Title: "Midnight Cosmetics" with moon emoji
+- Chat interface with `st.chat_input`
+- Messages show which agent handled them via `st.caption`
+- Sidebar shows:
+  - Current session ID
+  - Current active agent
+  - Agent handoff history (e.g., "Router → product-agent → escalation-agent")
+  - "New Conversation" button that resets everything
+
+### Message Handling
+- Stream `AssistantMessage` content blocks — collect `TextBlock` text
+- Track agent routing via `ToolUseBlock` where `block.name == "Agent"` — read `subagent_type` from input
+- Capture `session_id` from `ResultMessage` for session resumption
+- Only use `ResultMessage.result` as fallback if no text was collected from streaming
+
+## Test Scenarios
+
+| # | Input | Expected |
+|---|---|---|
+| 1 | "What products do you have for oily skin?" | Routes to product-agent → CSV lookup → finds Stardust Setting Powder |
+| 2 | "How do I apply foundation without it looking cakey?" | Routes to product-agent → vector store search → finds application tips |
+| 3 | "I want to return order MC-1001" | Routes to returns-agent → order lookup → 3 days since delivery → eligible |
+| 4 | "I want to return order MC-1002" | Routes to returns-agent → order lookup → 10 days → past window, denied |
+| 5 | "I want to return order MC-1003" | Routes to returns-agent → sale item → final sale, denied |
+| 6 | "Order MC-1008 arrived damaged" | Routes to returns-agent → damage exception → full refund offered |
+| 7 | "I took the beauty quiz: oily skin, natural look, acne" | Routes to beauty-profile-agent → collects info → generates .docx |
+| 8 | "I need to speak to a manager" | Routes to escalation-agent → asks for name and email |
