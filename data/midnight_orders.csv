@@ -1,0 +1,9 @@
+order_id,customer,email,product,price,order_date,delivery_date,status,sale_item
+MC-1001,Sarah Chen,sarah@email.com,Lunar Glow Foundation,42,2026-03-20,2026-03-23,Delivered,No
+MC-1002,Jessica Park,jess@email.com,Eclipse Eye Palette,52,2026-03-12,2026-03-16,Delivered,No
+MC-1003,Aisha Johnson,aisha@email.com,Midnight Matte Lipstick,28,2026-03-18,2026-03-21,Delivered,Yes
+MC-1004,Maria Lopez,maria@email.com,Nova Hydrating Primer,30,2026-03-24,pending,Shipped,No
+MC-1005,Emily Wright,emily@email.com,Stardust Setting Powder,35,2026-03-19,2026-03-20,Delivered,No
+MC-1006,Priya Sharma,priya@email.com,Twilight Mascara,24,2026-03-25,pending,Processing,No
+MC-1007,Lauren Kim,lauren@email.com,Cosmic Blush Duo,32,2026-03-10,2026-03-13,Delivered,No
+MC-1008,Dana Torres,dana@email.com,Moonbeam Highlighter,34,2026-03-22,2026-03-24,Delivered,No
