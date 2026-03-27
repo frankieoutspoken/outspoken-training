@@ -15,7 +15,7 @@ from src.tools.product_lookup import search_products
 from src.tools.order_lookup import lookup_order
 from src.tools.knowledge_search import search_knowledge_base
 from src.tools.document_generator import generate_beauty_profile
-from src.agents.definitions import AGENTS
+from src.agents import AGENTS
 
 # --- MCP Server with all custom tools ---
 midnight_server = create_sdk_mcp_server(
